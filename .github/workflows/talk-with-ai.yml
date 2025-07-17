@@ -1,0 +1,13 @@
+name: Talk to Other AI
+on:
+  workflow_dispatch:
+jobs:
+  ask:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the AI
+        run: |
+          curl https://api.otherai.com/v1/chat \
+            -H "Authorization: Bearer ${{ secrets.OTHER_AI_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"prompt":"Hello from Copilot Actions!"}'
