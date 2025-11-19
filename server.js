@@ -3,25 +3,176 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
-const fs = require('fs');
+const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const IS_PRODUCTION = NODE_ENV === 'production';
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const CONFIG = {
+  MAX_PROMPT_LENGTH: 10000, // 10k chars max
+  FREE_TIER_LIMIT: 3,
+  RATE_LIMIT_WINDOW: 60 * 1000, // 1 minute
+  RATE_LIMIT_FREE: 10, // 10 requests per minute for free users
+  RATE_LIMIT_PAID: 100, // 100 requests per minute for paid users
+  REQUEST_TIMEOUT: 30000, // 30 seconds
+  USAGE_FILE: path.join(__dirname, 'usage.json'),
+};
+
+// ============================================================================
+// IN-MEMORY STORAGE (Serverless-compatible)
+// ============================================================================
+
+class UsageStore {
+  constructor() {
+    this.data = new Map(); // In-memory storage
+    this.rateLimits = new Map(); // Rate limiting
+    this.requestLocks = new Map(); // Prevent race conditions
+    this.loadFromFile(); // Try to load persisted data
+  }
+
+  // Load data from file (if exists and writable)
+  async loadFromFile() {
+    try {
+      if (fsSync.existsSync(CONFIG.USAGE_FILE)) {
+        const fileData = await fs.readFile(CONFIG.USAGE_FILE, 'utf-8');
+        const parsed = JSON.parse(fileData);
+        this.data = new Map(Object.entries(parsed));
+        console.log(`✓ Loaded ${this.data.size} user records from file`);
+      }
+    } catch (error) {
+      console.log('⚠ Could not load usage file (this is OK on serverless):', error.message);
+    }
+  }
+
+  // Save data to file (if writable)
+  async saveToFile() {
+    try {
+      const obj = Object.fromEntries(this.data);
+      await fs.writeFile(CONFIG.USAGE_FILE, JSON.stringify(obj, null, 2));
+    } catch (error) {
+      // Silently fail on serverless (expected)
+      if (!IS_PRODUCTION) {
+        console.log('⚠ Could not save usage file:', error.message);
+      }
+    }
+  }
+
+  // Get user usage (atomic)
+  getUsage(userId) {
+    return this.data.get(userId) || { count: 0, isPaid: false, createdAt: Date.now() };
+  }
+
+  // Update user usage (atomic, no race conditions)
+  async updateUsage(userId, updates) {
+    // Atomic update
+    const current = this.getUsage(userId);
+    const updated = { ...current, ...updates, updatedAt: Date.now() };
+    this.data.set(userId, updated);
+
+    // Persist to file (fire-and-forget)
+    this.saveToFile().catch(() => {});
+
+    return updated;
+  }
+
+  // Check rate limit
+  checkRateLimit(userId, isPaid) {
+    const key = `ratelimit:${userId}`;
+    const now = Date.now();
+    const limit = isPaid ? CONFIG.RATE_LIMIT_PAID : CONFIG.RATE_LIMIT_FREE;
+
+    // Get existing rate limit data
+    let rateData = this.rateLimits.get(key) || { count: 0, resetAt: now + CONFIG.RATE_LIMIT_WINDOW };
+
+    // Reset if window expired
+    if (now > rateData.resetAt) {
+      rateData = { count: 0, resetAt: now + CONFIG.RATE_LIMIT_WINDOW };
+    }
+
+    // Increment
+    rateData.count++;
+    this.rateLimits.set(key, rateData);
+
+    // Check if exceeded
+    if (rateData.count > limit) {
+      const resetIn = Math.ceil((rateData.resetAt - now) / 1000);
+      return {
+        allowed: false,
+        resetIn,
+        limit
+      };
+    }
+
+    return {
+      allowed: true,
+      remaining: limit - rateData.count,
+      resetAt: rateData.resetAt
+    };
+  }
+
+  // Cleanup old entries (prevent memory leak)
+  cleanup() {
+    const now = Date.now();
+    const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+    // Cleanup old users (free tier, inactive)
+    for (const [userId, data] of this.data.entries()) {
+      if (!data.isPaid && data.updatedAt && (now - data.updatedAt > maxAge)) {
+        this.data.delete(userId);
+      }
+    }
+
+    // Cleanup old rate limit entries
+    for (const [key, data] of this.rateLimits.entries()) {
+      if (now > data.resetAt + CONFIG.RATE_LIMIT_WINDOW) {
+        this.rateLimits.delete(key);
+      }
+    }
+
+    console.log(`🧹 Cleanup: ${this.data.size} users, ${this.rateLimits.size} rate limit entries`);
+  }
+}
+
+const store = new UsageStore();
+
+// Cleanup every hour
+setInterval(() => store.cleanup(), 60 * 60 * 1000);
+
+// ============================================================================
+// MIDDLEWARE
+// ============================================================================
+
+// CORS - Restrictive in production
+const corsOptions = IS_PRODUCTION
+  ? {
+      origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : false,
+      credentials: true
+    }
+  : {}; // Wide open in dev
+
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '50kb' })); // Limit payload size
 app.use(cookieParser());
 app.use(express.static('public'));
 
-// Simple file-based storage for usage tracking
-const USAGE_FILE = path.join(__dirname, 'usage.json');
+// Request timeout
+app.use((req, res, next) => {
+  req.setTimeout(CONFIG.REQUEST_TIMEOUT);
+  res.setTimeout(CONFIG.REQUEST_TIMEOUT);
+  next();
+});
 
-// Initialize usage file if it doesn't exist
-if (!fs.existsSync(USAGE_FILE)) {
-  fs.writeFileSync(USAGE_FILE, JSON.stringify({}));
-}
+// ============================================================================
+// UTILITIES
+// ============================================================================
 
 // Get or create user session
 function getUserSession(req, res) {
@@ -29,117 +180,190 @@ function getUserSession(req, res) {
 
   if (!userId) {
     userId = uuidv4();
-    res.cookie('userId', userId, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: true });
+    res.cookie('userId', userId, {
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      secure: IS_PRODUCTION,
+      sameSite: 'strict' // CSRF protection
+    });
   }
 
   return userId;
 }
 
-// Get user usage data
-function getUserUsage(userId) {
-  const data = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf-8'));
-  return data[userId] || { count: 0, isPaid: false };
+// Input validation
+function validatePrompt(prompt) {
+  if (!prompt || typeof prompt !== 'string') {
+    return { valid: false, error: 'Prompt is required' };
+  }
+
+  const trimmed = prompt.trim();
+
+  if (!trimmed) {
+    return { valid: false, error: 'Prompt cannot be empty' };
+  }
+
+  if (trimmed.length > CONFIG.MAX_PROMPT_LENGTH) {
+    return {
+      valid: false,
+      error: `Prompt too long. Maximum ${CONFIG.MAX_PROMPT_LENGTH} characters (you sent ${trimmed.length})`
+    };
+  }
+
+  return { valid: true, prompt: trimmed };
 }
 
-// Update user usage
-function updateUserUsage(userId, usage) {
-  const data = JSON.parse(fs.readFileSync(USAGE_FILE, 'utf-8'));
-  data[userId] = usage;
-  fs.writeFileSync(USAGE_FILE, JSON.stringify(data, null, 2));
+// Error handler
+function handleError(res, error, message = 'Internal server error') {
+  console.error('Error:', error);
+
+  const response = { error: message };
+
+  // Include details in development
+  if (!IS_PRODUCTION) {
+    response.details = error.message;
+    response.stack = error.stack;
+  }
+
+  res.status(500).json(response);
 }
 
-// API endpoint to check usage
-app.get('/api/usage', (req, res) => {
-  const userId = getUserSession(req, res);
-  const usage = getUserUsage(userId);
+// ============================================================================
+// API ROUTES
+// ============================================================================
 
+// Health check
+app.get('/api/health', (req, res) => {
   res.json({
-    remaining: usage.isPaid ? 'unlimited' : Math.max(0, 3 - usage.count),
-    isPaid: usage.isPaid,
-    total: usage.count
+    status: 'ok',
+    environment: NODE_ENV,
+    timestamp: new Date().toISOString(),
+    storage: store.data.size,
+    uptime: process.uptime()
   });
 });
 
-// API endpoint to optimize prompt (the main cheat code generator)
-app.post('/api/optimize', async (req, res) => {
-  const userId = getUserSession(req, res);
-  const usage = getUserUsage(userId);
-  const { prompt } = req.body;
-
-  if (!prompt) {
-    return res.status(400).json({ error: 'Prompt is required' });
-  }
-
-  // Check if user has uses remaining
-  if (!usage.isPaid && usage.count >= 3) {
-    return res.status(403).json({
-      error: 'Out of free cheat codes',
-      message: 'You\'ve used all 3 free cheat codes. Upgrade for unlimited access!'
-    });
-  }
-
+// Get usage
+app.get('/api/usage', (req, res) => {
   try {
-    // Call AI API to optimize the prompt
-    const optimizedPrompt = await optimizePromptWithAI(prompt);
-
-    // Increment usage count
-    usage.count += 1;
-    updateUserUsage(userId, usage);
+    const userId = getUserSession(req, res);
+    const usage = store.getUsage(userId);
 
     res.json({
-      original: prompt,
-      optimized: optimizedPrompt,
-      remaining: usage.isPaid ? 'unlimited' : Math.max(0, 3 - usage.count)
+      remaining: usage.isPaid ? 'unlimited' : Math.max(0, CONFIG.FREE_TIER_LIMIT - usage.count),
+      isPaid: usage.isPaid,
+      total: usage.count
     });
   } catch (error) {
-    console.error('Error optimizing prompt:', error);
-    res.status(500).json({ error: 'Failed to optimize prompt' });
+    handleError(res, error, 'Failed to fetch usage');
   }
 });
 
-// Upgrade user to paid (manual verification endpoint)
-app.post('/api/upgrade', (req, res) => {
-  const userId = getUserSession(req, res);
-  const { verificationCode } = req.body;
+// Optimize prompt (main endpoint)
+app.post('/api/optimize', async (req, res) => {
+  try {
+    const userId = getUserSession(req, res);
+    const usage = store.getUsage(userId);
 
-  // Simple verification - you can change this to match your Ko-fi/PayPal codes
-  const validCodes = (process.env.VALID_CODES || '').split(',');
+    // Input validation
+    const validation = validatePrompt(req.body.prompt);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
 
-  if (validCodes.includes(verificationCode)) {
-    const usage = getUserUsage(userId);
-    usage.isPaid = true;
-    updateUserUsage(userId, usage);
+    // Rate limiting
+    const rateLimit = store.checkRateLimit(userId, usage.isPaid);
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: `Too many requests. Try again in ${rateLimit.resetIn} seconds.`,
+        retryAfter: rateLimit.resetIn
+      });
+    }
 
-    return res.json({ success: true, message: 'Upgraded to unlimited!' });
+    // Check free tier limit
+    if (!usage.isPaid && usage.count >= CONFIG.FREE_TIER_LIMIT) {
+      return res.status(403).json({
+        error: 'Out of free cheat codes',
+        message: 'You\'ve used all 3 free cheat codes. Upgrade for unlimited access!'
+      });
+    }
+
+    // Call AI optimizer
+    const optimizedPrompt = await optimizePromptWithAI(validation.prompt);
+
+    // Update usage count (atomic)
+    const newUsage = await store.updateUsage(userId, {
+      count: usage.count + 1
+    });
+
+    // Return result
+    res.json({
+      original: validation.prompt,
+      optimized: optimizedPrompt,
+      remaining: newUsage.isPaid ? 'unlimited' : Math.max(0, CONFIG.FREE_TIER_LIMIT - newUsage.count)
+    });
+  } catch (error) {
+    handleError(res, error, 'Failed to optimize prompt');
   }
+});
 
-  res.status(400).json({ error: 'Invalid verification code' });
+// Upgrade to paid
+app.post('/api/upgrade', async (req, res) => {
+  try {
+    const userId = getUserSession(req, res);
+    const { verificationCode } = req.body;
+
+    if (!verificationCode || typeof verificationCode !== 'string') {
+      return res.status(400).json({ error: 'Verification code is required' });
+    }
+
+    // Check code
+    const validCodes = (process.env.VALID_CODES || '').split(',').map(c => c.trim());
+
+    if (validCodes.includes(verificationCode.trim().toUpperCase())) {
+      await store.updateUsage(userId, { isPaid: true });
+
+      return res.json({
+        success: true,
+        message: 'Upgraded to unlimited!'
+      });
+    }
+
+    res.status(400).json({ error: 'Invalid verification code' });
+  } catch (error) {
+    handleError(res, error, 'Failed to upgrade');
+  }
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Not found',
+    path: req.path
+  });
 });
 
 // ============================================================================
-// THE GAME GENIE ENGINE - This is where the magic happens
+// THE GAME GENIE ENGINE
 // ============================================================================
 
 /**
- * CHEAT CODE SYSTEM - Inspired by Game Genie
+ * CHEAT CODE SYSTEM - Full documentation in CHEATCODES.md
  *
- * Game Genie intercepted game memory and replaced data with cheat codes.
- * CheatCodez intercepts prompts and injects optimization codes.
- *
- * Each "cheat code" targets a specific weakness in the prompt:
- *
- * CODE 1: TOOLSEEKER - Forces LLM to reveal if tools/products/commands exist
- * CODE 2: SPECIFICITY+ - Transforms vague into specific
- * CODE 3: STEPBYSTEP - Demands step-by-step breakdown
- * CODE 4: EXAMPLES++ - Forces concrete examples
- * CODE 5: EXPERTMODE - Skips beginner explanations
- * CODE 6: SHORTCUT - Reveals the fastest/easiest way
- * CODE 7: EDGECASES - Exposes potential problems
- * CODE 8: CONTEXT_INJECT - Adds critical missing context
- * CODE 9: ASSUMPTION_BREAK - Questions hidden assumptions
- * CODE 10: TRUTHSERUM - "What are you not telling me?"
- * CODE 11: FORMAT_CONTROL - Structures the response
- * CODE 12: DEPTH_DIAL - Controls detail level
+ * 12 cheat codes that transform weak prompts into optimized prompts:
+ * 1. TOOLSEEKER - Forces LLM to reveal if tools/products exist
+ * 2. SPECIFICITY+ - Transforms vague into specific
+ * 3. STEPBYSTEP - Demands step-by-step breakdown
+ * 4. EXAMPLES++ - Forces concrete examples
+ * 5. EXPERTMODE - Skips beginner explanations
+ * 6. SHORTCUT - Reveals the fastest way
+ * 7. EDGECASES - Exposes potential problems
+ * 8. CONTEXT_INJECT - Adds critical missing context
+ * 9. ASSUMPTION_BREAK - Questions hidden assumptions
+ * 10. TRUTHSERUM - "What are you not telling me?"
+ * 11. FORMAT_CONTROL - Structures the response
+ * 12. DEPTH_DIAL - Controls detail level
  */
 
 const GOD_PROMPT = `You are the CHEAT CODE GENERATOR - like Game Genie for LLMs.
@@ -219,72 +443,6 @@ Add critical context like:
 
 Return ONLY the optimized prompt. No explanations. No meta-commentary. Just the cheat code.
 
-## EXAMPLES
-
-**Bad:** "how do i fix my code"
-
-**Cheat Code:** "I have code that's not working as expected. Before we debug:
-1. First, are there any debugging tools, linters, or extensions I should be using that would catch this automatically?
-2. Here's my code: [user needs to paste it]
-3. Expected behavior: [describe]
-4. Actual behavior: [describe]
-
-Please analyze step-by-step, identify the root cause, explain why it's happening, provide the fixed code with inline comments, and tell me what I should learn to prevent this in the future. If there's a faster way to debug this category of issues, show me that too."
-
----
-
-**Bad:** "best way to learn python"
-
-**Cheat Code:** "What's the fastest way to become productive in Python for [user's specific use case - web dev/data science/automation]?
-
-Skip beginner resources. I need:
-1. The 20% of Python that covers 80% of real-world usage
-2. Specific projects to build (with links to good examples)
-3. Common mistakes to avoid
-4. Tools/IDEs/extensions that speed up development
-5. What I should skip learning (at least initially)
-
-Assume I already know programming basics. Give me the shortcut to productivity, not the 'complete' path."
-
----
-
-**Bad:** "website won't load"
-
-**Cheat Code:** "My website isn't loading. Before troubleshooting:
-- Are there any diagnostic tools or commands I should run first to identify the issue category?
-- What are the most common causes of website loading failures, ranked by probability?
-
-Context:
-- Platform: [hosting platform]
-- Domain: [domain]
-- Error message: [exact error]
-- What changed recently: [list]
-- Already tried: [list]
-
-Please provide step-by-step diagnostics, starting with the fastest checks first. For each potential cause, give me the exact command or test to verify it. If this is likely something with a known fix/tool, tell me immediately."
-
----
-
-**Bad:** "make my app faster"
-
-**Cheat Code:** "I need to optimize my app's performance.
-
-First: What profiling/monitoring tools should I be using to identify bottlenecks? Don't guess - let's measure.
-
-Context:
-- Tech stack: [framework/language]
-- Specific slowness: [page load/query/etc.]
-- Current metrics: [numbers if available]
-- Scale: [users/requests]
-
-Then provide:
-1. The top 3 most common performance bottlenecks for [this tech stack], ranked by likelihood
-2. How to diagnose which one I have (specific tools/commands)
-3. Fixes for each, with expected impact
-4. The low-hanging fruit - quick wins I can implement in under an hour
-
-Skip theoretical optimization. Give me practical, measurable improvements."
-
 ## CRITICAL RULES
 
 1. **Always inject TOOLSEEKER** - "Does a tool exist?" is the most important question
@@ -302,9 +460,8 @@ Stop people from wasting time. Give them the cheat code that unlocks the real an
 
 Now optimize this prompt:`;
 
-// Main AI optimization function - Works with ANY OpenAI-compatible API
+// Main AI optimization function
 async function optimizePromptWithAI(userPrompt) {
-  // Determine which API to use
   const apiKey = process.env.API_KEY ||
                  process.env.OPENAI_API_KEY ||
                  process.env.ANTHROPIC_API_KEY ||
@@ -319,7 +476,7 @@ async function optimizePromptWithAI(userPrompt) {
                     'gpt-4o-mini';
 
   if (!apiKey) {
-    console.log('No API key found, using fallback optimization');
+    console.log('⚠ No API key found, using fallback optimization');
     return generateFallbackOptimization(userPrompt);
   }
 
@@ -328,8 +485,11 @@ async function optimizePromptWithAI(userPrompt) {
     return await optimizeWithAnthropic(userPrompt);
   }
 
-  // OpenAI-compatible API (works with OpenAI, Perplexity, Together, etc.)
+  // OpenAI-compatible API
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT);
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -339,37 +499,36 @@ async function optimizePromptWithAI(userPrompt) {
       body: JSON.stringify({
         model: modelName,
         messages: [
-          {
-            role: 'system',
-            content: GOD_PROMPT
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
+          { role: 'system', content: GOD_PROMPT },
+          { role: 'user', content: userPrompt }
         ],
         temperature: 0.7,
         max_tokens: 1000
-      })
+      }),
+      signal: controller.signal
     });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('API Error:', response.status, errorText);
       throw new Error(`API returned ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
     return data.choices[0].message.content.trim();
   } catch (error) {
-    console.error('API error:', error);
+    console.error('API error:', error.message);
     return generateFallbackOptimization(userPrompt);
   }
 }
 
-// Anthropic-specific API call (different format)
+// Anthropic-specific API call
 async function optimizeWithAnthropic(userPrompt) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT);
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -380,73 +539,71 @@ async function optimizeWithAnthropic(userPrompt) {
       body: JSON.stringify({
         model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
         max_tokens: 1000,
-        messages: [
-          {
-            role: 'user',
-            content: `${GOD_PROMPT}\n\n${userPrompt}`
-          }
-        ]
-      })
+        messages: [{ role: 'user', content: `${GOD_PROMPT}\n\n${userPrompt}` }]
+      }),
+      signal: controller.signal
     });
+
+    clearTimeout(timeout);
 
     const data = await response.json();
     return data.content[0].text.trim();
   } catch (error) {
-    console.error('Anthropic API error:', error);
+    console.error('Anthropic API error:', error.message);
     return generateFallbackOptimization(userPrompt);
   }
 }
 
-// Advanced fallback optimization - No API needed
+// Advanced fallback optimization
 function generateFallbackOptimization(prompt) {
   console.log('Using rule-based fallback optimization');
 
-  // Analyze the prompt
-  const isVague = prompt.length < 50;
-  const hasNoContext = !prompt.includes('context') && !prompt.includes('using') && !prompt.includes('with');
-  const hasNoGoal = !prompt.includes('want') && !prompt.includes('need') && !prompt.includes('how');
-  const isQuestion = prompt.includes('?');
+  const enhancements = [
+    "First: Do any tools, products, commands, or libraries exist that solve this directly? If yes, tell me immediately.",
+    "\nStructure your response:",
+    "1. Quick answer (if a shortcut/tool exists, say it NOW)",
+    "2. Step-by-step breakdown",
+    "3. Concrete examples",
+    "4. Potential pitfalls or edge cases",
+    "5. What I should have asked (if I'm missing something)",
+    "\nBe extremely specific:",
+    "- Include exact commands, not descriptions",
+    "- Provide actual URLs/links where relevant",
+    "- Give concrete examples, not abstract explanations"
+  ];
 
-  let optimized = prompt;
-
-  // Build the optimized version using cheat codes
-  const enhancements = [];
-
-  // Always add TOOLSEEKER
-  enhancements.push("First: Do any tools, products, commands, or libraries exist that solve this directly? If yes, tell me immediately.");
-
-  // Add context request if missing
-  if (hasNoContext) {
-    enhancements.push("\nProvide context about:\n- Environment (OS, language, framework, etc.)\n- What's been tried already\n- Specific constraints or requirements");
-  }
-
-  // Add structure requirements
-  enhancements.push("\nStructure your response:");
-  enhancements.push("1. Quick answer (if a shortcut/tool exists, say it NOW)");
-  enhancements.push("2. Step-by-step breakdown");
-  enhancements.push("3. Concrete examples");
-  enhancements.push("4. Potential pitfalls or edge cases");
-  enhancements.push("5. What I should have asked (if I'm missing something)");
-
-  // Add specificity requirements
-  enhancements.push("\nBe extremely specific:");
-  enhancements.push("- Include exact commands, not descriptions");
-  enhancements.push("- Provide actual URLs/links where relevant");
-  enhancements.push("- Give concrete examples, not abstract explanations");
-
-  // Combine
-  optimized = `${prompt}\n\n${enhancements.join('\n')}`;
-
-  return optimized;
+  return `${prompt}\n\n${enhancements.join('\n')}`;
 }
 
-// Start server
-app.listen(PORT, () => {
+// ============================================================================
+// SERVER STARTUP
+// ============================================================================
+
+const server = app.listen(PORT, () => {
   console.log(`\n🎮 CheatCodez Server Running`);
+  console.log(`Environment: ${NODE_ENV}`);
   console.log(`URL: http://localhost:${PORT}`);
   console.log(`\nAPI Configuration:`);
   console.log(`- API Key: ${!!(process.env.API_KEY || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.PERPLEXITY_API_KEY) ? '✅ Configured' : '❌ Missing (using fallback)'}`);
-  console.log(`- API URL: ${process.env.API_URL || process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions (default)'}`);
-  console.log(`- Model: ${process.env.MODEL_NAME || process.env.OPENAI_MODEL || 'gpt-4o-mini (default)'}`);
+  console.log(`- Storage: ${store.data.size} users in memory`);
   console.log(`\n🔥 CheatCodez Engine: ACTIVE\n`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 SIGTERM received, shutting down gracefully...');
+  await store.saveToFile();
+  server.close(() => {
+    console.log('✓ Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  console.log('\n🛑 SIGINT received, shutting down gracefully...');
+  await store.saveToFile();
+  server.close(() => {
+    console.log('✓ Server closed');
+    process.exit(0);
+  });
 });
