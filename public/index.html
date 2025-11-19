@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CheatCodez - Cheat Codes for AI</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Video Background -->
+    <div class="video-background">
+        <video autoplay muted loop playsinline id="bg-video">
+            <source src="https://assets.mixkit.co/videos/preview/mixkit-ancient-lamp-in-the-desert-4390-large.mp4" type="video/mp4">
+        </video>
+        <div class="overlay"></div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <header>
+            <h1 class="glitch" data-text="CHEATCODEZ">CHEATCODEZ</h1>
+            <p class="tagline">Cheat Codes for AI Conversations</p>
+        </header>
+
+        <div class="usage-indicator" id="usage">
+            <span id="usage-text">Loading...</span>
+        </div>
+
+        <main>
+            <div class="input-section">
+                <textarea
+                    id="user-prompt"
+                    placeholder="Paste your question, prompt, or entire conversation here...&#10;&#10;Get the CHEAT CODE - what you should have asked to get real answers."
+                    rows="8"
+                ></textarea>
+                <button id="optimize-btn" class="cta-button">
+                    <span class="button-text">GET CHEAT CODE</span>
+                    <span class="button-icon">🎮</span>
+                </button>
+            </div>
+
+            <div class="output-section" id="output-section" style="display: none;">
+                <h3>YOUR CHEAT CODE:</h3>
+                <div class="cheat-code" id="optimized-output"></div>
+                <button id="copy-btn" class="copy-button">
+                    <span>📋 Copy Cheat Code</span>
+                </button>
+            </div>
+
+            <div class="paywall" id="paywall" style="display: none;">
+                <h2>🎮 Out of Free Cheat Codes!</h2>
+                <p>You've used all 3 free cheat codes.</p>
+                <p class="upgrade-text">Upgrade for UNLIMITED access</p>
+
+                <div class="payment-options">
+                    <a href="YOUR_KOFI_LINK" target="_blank" class="payment-button kofi">
+                        ☕ Pay with Ko-fi - $4.99
+                    </a>
+                    <a href="YOUR_PAYPAL_LINK" target="_blank" class="payment-button paypal">
+                        💳 Pay with PayPal - $4.99
+                    </a>
+                </div>
+
+                <div class="code-entry">
+                    <p class="code-instructions">After payment, enter your verification code:</p>
+                    <input type="text" id="verification-code" placeholder="Enter code from email">
+                    <button id="verify-btn" class="verify-button">Activate Unlimited</button>
+                </div>
+
+                <p class="contact-text">Didn't receive a code? Email: your@email.com</p>
+            </div>
+        </main>
+
+        <footer>
+            <p>Stop wasting time. Get the shortcuts LLMs are hiding from you.</p>
+            <p class="dead-pan">Your LLM has been holding out on you. We're just giving you the cheat codes.</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
