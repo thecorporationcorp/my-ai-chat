@@ -333,6 +333,86 @@ app.post('/api/optimize', async (req, res) => {
   }
 });
 
+// ============================================================================
+// PROJECT-BASED ENDPOINT (Uses OpenAI Project System)
+// ============================================================================
+
+/**
+ * /api/generate - OpenAI Project Integration
+ *
+ * This endpoint uses the OpenAI Responses API with Projects.
+ * System prompts live in the OpenAI Project files, NOT in this code.
+ *
+ * SETUP:
+ * 1. Create an OpenAI Project at https://platform.openai.com/projects
+ * 2. Upload your system prompt file (e.g., system.md) to the project
+ * 3. Copy the Project ID (e.g., proj_abc123...)
+ * 4. Add it to your .env file: OPENAI_PROJECT_ID=proj_abc123...
+ * 5. Restart server - everything will work instantly
+ */
+app.post('/api/generate', async (req, res) => {
+  try {
+    const userId = getUserSession(req, res);
+    const usage = store.getUsage(userId);
+
+    // Input validation
+    const validation = validatePrompt(req.body.prompt);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
+
+    // Rate limiting
+    const rateLimit = store.checkRateLimit(userId, usage.isPaid);
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: 'Rate limit exceeded',
+        message: `Too many requests. Try again in ${rateLimit.resetIn} seconds.`,
+        retryAfter: rateLimit.resetIn
+      });
+    }
+
+    // Check free tier limit
+    if (!usage.isPaid && usage.count >= CONFIG.FREE_TIER_LIMIT) {
+      return res.status(403).json({
+        error: 'Out of free cheat codes',
+        message: 'You\'ve used all 3 free cheat codes. Upgrade for unlimited access!'
+      });
+    }
+
+    // PLACEHOLDER: Insert your OpenAI Project ID here
+    const projectId = process.env.OPENAI_PROJECT_ID || 'YOUR_PROJECT_ID_HERE';
+
+    if (projectId === 'YOUR_PROJECT_ID_HERE') {
+      console.warn('⚠️  OPENAI_PROJECT_ID not configured');
+      return res.status(500).json({
+        error: 'Project not configured',
+        message: 'OpenAI Project ID is missing. Add OPENAI_PROJECT_ID to your .env file.',
+        docs: 'https://platform.openai.com/docs/api-reference/project'
+      });
+    }
+
+    // Call OpenAI with Project (system prompt lives in project files)
+    const optimizedPrompt = await generateWithProject({
+      prompt: validation.prompt,
+      projectId: projectId
+    });
+
+    // Update usage count (atomic)
+    const newUsage = await store.updateUsage(userId, {
+      count: usage.count + 1
+    });
+
+    // Return result
+    res.json({
+      original: validation.prompt,
+      optimized: optimizedPrompt,
+      remaining: newUsage.isPaid ? 'unlimited' : Math.max(0, CONFIG.FREE_TIER_LIMIT - newUsage.count)
+    });
+  } catch (error) {
+    handleError(res, error, 'Failed to generate response');
+  }
+});
+
 // Upgrade to paid
 app.post('/api/upgrade', async (req, res) => {
   try {
@@ -576,6 +656,102 @@ async function optimizeWithAnthropic(userPrompt) {
   } catch (error) {
     console.error('Anthropic API error:', error.message);
     return generateFallbackOptimization(userPrompt);
+  }
+}
+
+// ============================================================================
+// PROJECT-BASED AI GENERATION (No system prompt in code!)
+// ============================================================================
+
+/**
+ * Generate response using OpenAI Project
+ *
+ * The system prompt lives in the OpenAI Project files (e.g., system.md),
+ * NOT in this code. This keeps prompts version-controlled in OpenAI's system.
+ *
+ * IMPORTANT:
+ * - No system prompt needed here
+ * - Upload GOD_PROMPT to your project as system.md
+ * - OpenAI automatically uses it
+ *
+ * @param {Object} options - Generation options
+ * @param {string} options.prompt - User's prompt
+ * @param {string} options.projectId - OpenAI Project ID (e.g., proj_abc123...)
+ * @returns {Promise<string>} - Generated response
+ */
+async function generateWithProject({ prompt, projectId }) {
+  const apiKey = process.env.OPENAI_API_KEY ||
+                 process.env.API_KEY;
+
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY not configured. Add it to your .env file.');
+  }
+
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT);
+
+    // OpenAI API call with Project ID
+    // System prompt comes from project files, NOT from this code
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        // CRITICAL: This tells OpenAI to use your project's system prompt
+        'OpenAI-Project': projectId
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          // NO system message here - it comes from the project files
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 1000
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI Project API error:', errorText);
+
+      // Better error messages
+      if (response.status === 401) {
+        throw new Error('Invalid API key. Check your OPENAI_API_KEY in .env');
+      }
+      if (response.status === 404) {
+        throw new Error(`Project not found: ${projectId}. Check your OPENAI_PROJECT_ID in .env`);
+      }
+      if (response.status === 403) {
+        throw new Error(`Access denied to project: ${projectId}. Verify project permissions.`);
+      }
+
+      throw new Error(`OpenAI API returned ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid response structure from OpenAI API');
+    }
+
+    return data.choices[0].message.content.trim();
+  } catch (error) {
+    // Log the error but don't expose API keys
+    console.error('Generate with project failed:', error.message);
+
+    // Re-throw with sanitized message
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout. The AI took too long to respond.');
+    }
+
+    throw error;
   }
 }
 
