@@ -328,7 +328,9 @@ async function handleCopy() {
       window.getSelection().removeAllRanges();
       window.getSelection().addRange(range);
 
-      showError('Text selected! Press Ctrl+C (or Cmd+C) to copy.', 'info');
+      if (window.toast) {
+        window.toast.info('Text selected! Press Ctrl+C (or Cmd+C) to copy.');
+      }
     } catch (selectError) {
       showError('Could not copy. Please select and copy manually.');
     }
@@ -411,13 +413,20 @@ function setLoadingState(isLoading) {
 }
 
 function showError(message, type = 'error') {
-  // Simple alert for now (could be replaced with toast notification)
-  alert(message);
+  if (window.toast) {
+    window.toast.error(message);
+  } else {
+    alert(message); // Fallback
+  }
   console.error(message);
 }
 
 function showSuccess(message) {
-  alert(message);
+  if (window.toast) {
+    window.toast.success(message);
+  } else {
+    alert(message); // Fallback
+  }
   console.log(message);
 }
 

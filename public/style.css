@@ -410,7 +410,227 @@ footer {
     pointer-events: none;
 }
 
-/* Responsive */
+/* ============================================================================
+   TOAST NOTIFICATIONS - Professional, accessible
+   ============================================================================ */
+
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 300px;
+    max-width: 500px;
+    padding: 16px 20px;
+    background: rgba(0, 0, 0, 0.95);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    transform: translateX(400px);
+    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    pointer-events: auto;
+    border-left: 4px solid;
+}
+
+.toast-show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.toast-hide {
+    opacity: 0;
+    transform: translateX(400px);
+}
+
+/* Toast types */
+.toast-success {
+    border-left-color: #00ff41;
+}
+
+.toast-error {
+    border-left-color: #ff0066;
+}
+
+.toast-warning {
+    border-left-color: #ffaa00;
+}
+
+.toast-info {
+    border-left-color: #00ffff;
+}
+
+.toast-icon {
+    font-size: 1.5rem;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.toast-success .toast-icon {
+    color: #00ff41;
+}
+
+.toast-error .toast-icon {
+    color: #ff0066;
+}
+
+.toast-warning .toast-icon {
+    color: #ffaa00;
+}
+
+.toast-info .toast-icon {
+    color: #00ffff;
+}
+
+.toast-message {
+    flex: 1;
+    color: #fff;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s;
+    flex-shrink: 0;
+}
+
+.toast-close:hover {
+    color: #fff;
+}
+
+/* ============================================================================
+   ACCESSIBILITY - Reduced Motion
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    .gradient-fallback {
+        animation: none;
+        background: linear-gradient(135deg,
+            rgba(10, 0, 20, 1) 0%,
+            rgba(30, 0, 50, 1) 100%
+        );
+    }
+
+    .video-container {
+        display: none !important;
+    }
+
+    .toast {
+        transition: opacity 0.1s;
+        transform: none;
+    }
+
+    .toast-show {
+        transform: none;
+    }
+
+    .toast-hide {
+        transform: none;
+    }
+}
+
+/* ============================================================================
+   LOADING STATES - Professional skeletons
+   ============================================================================ */
+
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.05) 25%,
+        rgba(255, 255, 255, 0.1) 50%,
+        rgba(255, 255, 255, 0.05) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+    border-radius: 4px;
+}
+
+@keyframes skeleton-loading {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(0, 255, 65, 0.3);
+    border-top-color: #00ff41;
+    border-radius: 50%;
+    animation: spinner-rotate 0.8s linear infinite;
+}
+
+@keyframes spinner-rotate {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ============================================================================
+   ACCESSIBILITY - Focus Visible & Screen Reader
+   ============================================================================ */
+
+/* Screen reader only - visually hidden but accessible */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+/* Focus visible for keyboard navigation */
+*:focus-visible {
+    outline: 2px solid #00ff41;
+    outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid #00ffff;
+    outline-offset: 2px;
+}
+
+/* ============================================================================
+   RESPONSIVE - Mobile Optimization
+   ============================================================================ */
+
 @media (max-width: 768px) {
     .glitch {
         font-size: 2.5rem;
@@ -427,4 +647,97 @@ footer {
     .paywall {
         padding: 25px;
     }
+
+    /* Mobile toast positioning */
+    .toast-container {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+    }
+
+    .toast {
+        min-width: unset;
+        width: 100%;
+        transform: translateY(-100px);
+    }
+
+    .toast-show {
+        transform: translateY(0);
+    }
+
+    .toast-hide {
+        transform: translateY(-100px);
+    }
+
+    /* Better mobile textarea */
+    #user-prompt {
+        min-height: 120px;
+        font-size: 16px; /* Prevents zoom on iOS */
+    }
+
+    /* Mobile-friendly buttons */
+    .cta-button {
+        font-size: 1rem;
+        padding: 18px;
+    }
+
+    /* Optimize paywall for mobile */
+    .payment-options {
+        gap: 12px;
+    }
+
+    .payment-button {
+        font-size: 1rem;
+        padding: 16px;
+    }
+}
+
+/* Touch device optimization */
+@media (hover: none) and (pointer: coarse) {
+    button,
+    .payment-button,
+    .copy-button {
+        min-height: 44px; /* Apple's minimum touch target */
+    }
+
+    .toast-close {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
+/* ============================================================================
+   NOSCRIPT FALLBACK
+   ============================================================================ */
+
+.noscript-warning {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #000;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    z-index: 99999;
+}
+
+.noscript-content {
+    max-width: 600px;
+}
+
+.noscript-content h1 {
+    color: #00ff41;
+    margin-bottom: 20px;
+    font-size: 2rem;
+}
+
+.noscript-content p {
+    margin-bottom: 15px;
+    line-height: 1.6;
+    color: #aaa;
 }

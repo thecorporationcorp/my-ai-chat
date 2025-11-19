@@ -170,6 +170,31 @@ app.use((req, res, next) => {
   next();
 });
 
+// Security headers
+app.use((req, res, next) => {
+  // Content Security Policy - Prevents XSS attacks
+  res.setHeader(
+    'Content-Security-Policy',
+    IS_PRODUCTION
+      ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://api.openai.com https://api.anthropic.com https://api.perplexity.ai https://api.together.xyz https://openrouter.ai; media-src 'self' https://assets.mixkit.co https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+      : "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src *; media-src *;" // Permissive in dev
+  );
+
+  // Other security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+
+  // HSTS in production
+  if (IS_PRODUCTION) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
+
+  next();
+});
+
 // ============================================================================
 // UTILITIES
 // ============================================================================
