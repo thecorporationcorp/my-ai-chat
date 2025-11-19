@@ -7,11 +7,27 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Video Background -->
+    <!-- Video Background with Fallback System -->
     <div class="video-background">
-        <video autoplay muted loop playsinline id="bg-video">
-            <source src="https://assets.mixkit.co/videos/preview/mixkit-ancient-lamp-in-the-desert-4390-large.mp4" type="video/mp4">
-        </video>
+        <!-- Fallback gradient (shows immediately, fades when video loads) -->
+        <div class="gradient-fallback"></div>
+
+        <!-- Video container (fades in when loaded) -->
+        <div class="video-container" id="video-container">
+            <video
+                autoplay
+                muted
+                loop
+                playsinline
+                preload="auto"
+                id="bg-video"
+                class="bg-video"
+            >
+                <!-- Video source will be dynamically set by JavaScript -->
+            </video>
+        </div>
+
+        <!-- Dark overlay for text readability -->
         <div class="overlay"></div>
     </div>
 
@@ -77,6 +93,8 @@
         </footer>
     </div>
 
+    <!-- Load video background system first, then main app -->
+    <script src="video-background.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

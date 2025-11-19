@@ -12,7 +12,10 @@ body {
     background: #000;
 }
 
-/* Video Background */
+/* ============================================================================
+   VIDEO BACKGROUND SYSTEM - Buttery smooth with fallbacks
+   ============================================================================ */
+
 .video-background {
     position: fixed;
     top: 0;
@@ -21,22 +24,71 @@ body {
     height: 100%;
     z-index: -1;
     overflow: hidden;
+    background: #000; /* Ultimate fallback */
 }
 
-#bg-video {
+/* Gradient Fallback - Shows immediately, beautiful even without video */
+.gradient-fallback {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg,
+        rgba(10, 0, 20, 1) 0%,
+        rgba(30, 0, 50, 1) 25%,
+        rgba(0, 20, 40, 1) 50%,
+        rgba(20, 0, 30, 1) 75%,
+        rgba(10, 0, 20, 1) 100%
+    );
+    /* Animated gradient for visual interest */
+    background-size: 400% 400%;
+    animation: gradientShift 15s ease infinite;
+    opacity: 1;
+    transition: opacity 1s ease-out;
+}
+
+@keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+/* Video Container - Fades in when loaded */
+.video-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0; /* Start invisible, fade in when loaded */
+    display: none; /* Hidden until video loads */
+}
+
+.bg-video {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    opacity: 0.4;
+    opacity: 0.4; /* Video opacity for text readability */
+    /* Buttery smooth performance */
+    will-change: opacity;
+    transform: translateZ(0); /* Hardware acceleration */
+    backface-visibility: hidden;
 }
 
+/* Dark overlay for text readability */
 .overlay {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.8), rgba(20, 0, 40, 0.9));
+    background: linear-gradient(135deg,
+        rgba(0, 0, 0, 0.8),
+        rgba(20, 0, 40, 0.9)
+    );
+    pointer-events: none; /* Don't block interactions */
+    z-index: 1; /* Above video, below content */
 }
 
 /* Container */
