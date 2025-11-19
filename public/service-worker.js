@@ -1,9 +1,10 @@
 // CheatCodez Service Worker - PWA & Offline Support
 // $400 billion budget: instant loads, offline fallback, smart caching
 
-const CACHE_VERSION = 'cheatcodez-v1.0.0';
+const CACHE_VERSION = 'cheatcodez-v3.0.0';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
+const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 
 // Files to cache immediately (critical for offline)
 const STATIC_ASSETS = [
@@ -109,16 +110,28 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(request)
       .then((response) => {
+        // Only cache successful responses
+        if (!response || response.status !== 200 || response.type === 'error') {
+          return response;
+        }
+
         // Clone response (can only read once)
         const responseClone = response.clone();
 
-        // Cache successful responses
-        if (response.status === 200) {
-          caches.open(DYNAMIC_CACHE)
-            .then((cache) => {
-              cache.put(request, responseClone);
-            });
-        }
+        // Cache successful responses (fire and forget)
+        caches.open(DYNAMIC_CACHE)
+          .then((cache) => {
+            // Add timestamp header for cache validation
+            const headers = new Headers(responseClone.headers);
+            headers.append('sw-cached-date', Date.now().toString());
+
+            cache.put(request, new Response(responseClone.body, {
+              status: responseClone.status,
+              statusText: responseClone.statusText,
+              headers: headers
+            }));
+          })
+          .catch(err => console.error('[SW] Cache write failed:', err));
 
         return response;
       })
@@ -128,23 +141,86 @@ self.addEventListener('fetch', (event) => {
           .then((cachedResponse) => {
             if (cachedResponse) {
               console.log('[SW] Serving from cache:', request.url);
+
+              // Validate cache age
+              const cachedDate = cachedResponse.headers.get('sw-cached-date');
+              if (cachedDate) {
+                const age = Date.now() - parseInt(cachedDate);
+                if (age > CACHE_MAX_AGE) {
+                  console.log('[SW] Cache expired, but serving anyway (offline)');
+                }
+              }
+
               return cachedResponse;
             }
 
             // No cache - return offline page
             if (request.destination === 'document') {
-              return caches.match('/index.html');
+              return caches.match('/index.html')
+                .then(page => page || createOfflinePage());
             }
 
             // For other resources, return error
-            return new Response('Offline - resource not cached', {
-              status: 503,
-              statusText: 'Service Unavailable'
-            });
+            return createOfflineResponse();
+          })
+          .catch(err => {
+            console.error('[SW] Cache read failed:', err);
+            return createOfflineResponse();
           });
       })
   );
 });
+
+// Helper: Create offline response
+function createOfflineResponse() {
+  return new Response('Offline - resource not cached', {
+    status: 503,
+    statusText: 'Service Unavailable',
+    headers: { 'Content-Type': 'text/plain' }
+  });
+}
+
+// Helper: Create offline HTML page
+function createOfflinePage() {
+  const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>CheatCodez - Offline</title>
+      <style>
+        body {
+          font-family: 'Courier New', monospace;
+          background: #000;
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 100vh;
+          margin: 0;
+          text-align: center;
+          padding: 20px;
+        }
+        h1 { color: #00ff41; }
+        p { color: #aaa; }
+      </style>
+    </head>
+    <body>
+      <div>
+        <h1>🎮 CheatCodez</h1>
+        <p><strong>You're offline</strong></p>
+        <p>Please check your internet connection and try again.</p>
+      </div>
+    </body>
+    </html>
+  `;
+
+  return new Response(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html' }
+  });
+}
 
 // ============================================================================
 // MESSAGE - Handle messages from app

@@ -104,8 +104,8 @@ async function init() {
     loadDraft();
 
     // Performance mark
-    performance.mark('app-init-end');
-    performance.measure('app-init', 'app-init-start', 'app-init-end');
+    appMetrics.mark('app-init-end');
+    appMetrics.measure('app-init', 'app-init-start', 'app-init-end');
 
     console.log('✓ CheatCodez initialized (production-perfect)');
   } catch (error) {
@@ -127,6 +127,9 @@ function setupEventListeners() {
 
   // Verify button
   DOM.verifyBtn.addEventListener('click', handleVerification);
+
+  // Auto-save draft (infinite budget feature)
+  DOM.userPromptTextarea.addEventListener('input', debounce(saveDraft, 1000));
 
   // Keyboard shortcuts
   DOM.userPromptTextarea.addEventListener('keydown', (e) => {
@@ -178,6 +181,10 @@ function setupValidation() {
 
 // Update usage display
 async function updateUsage() {
+  // Show loading skeleton
+  const usageElement = document.getElementById('usage');
+  usageElement.classList.add('loading');
+
   try {
     const response = await fetchWithTimeout('/api/usage');
 
@@ -204,6 +211,9 @@ async function updateUsage() {
     console.error('Error fetching usage:', error);
     DOM.usageText.textContent = 'Error loading usage data';
     DOM.usageText.style.color = '#ff6600';
+  } finally {
+    // Remove loading skeleton
+    usageElement.classList.remove('loading');
   }
 }
 
@@ -487,12 +497,12 @@ function loadDraft() {
   }
 }
 
-// Auto-save on input (debounced)
-DOM.userPromptTextarea.addEventListener('input', debounce(saveDraft, 1000));
+// Auto-save will be set up in setupEventListeners() after DOM is ready
 
 // 2. HAPTIC FEEDBACK (mobile vibration)
 function triggerHaptic(type = 'light') {
-  if (!navigator.vibrate) return;
+  // Check for vibration support
+  if (!('vibrate' in navigator)) return;
 
   const patterns = {
     light: [10],
@@ -502,7 +512,12 @@ function triggerHaptic(type = 'light') {
     error: [20, 10, 20, 10, 20]
   };
 
-  navigator.vibrate(patterns[type] || patterns.light);
+  try {
+    navigator.vibrate(patterns[type] || patterns.light);
+  } catch (e) {
+    // Vibration API can fail silently - that's fine
+    console.debug('Haptic feedback not available');
+  }
 }
 
 // 3. KEYBOARD SHORTCUTS
@@ -556,14 +571,21 @@ function hideKeyboardShortcuts() {
 
 // Global keyboard listener
 document.addEventListener('keydown', (e) => {
-  // Ignore if typing in input
+  // Ignore if typing in input/textarea
   if (e.target.matches('input, textarea')) {
+    // Only allow Escape key in inputs
     if (e.key === 'Escape') {
       hideKeyboardShortcuts();
     }
     return;
   }
 
+  // Ignore if modifier keys are pressed (except Shift for ?)
+  if (e.ctrlKey || e.altKey || e.metaKey) {
+    return;
+  }
+
+  // Handle shortcuts
   if (shortcuts[e.key]) {
     e.preventDefault();
     shortcuts[e.key]();
@@ -605,17 +627,22 @@ window.addEventListener('offline', () => {
 
 // 5. PWA INSTALL PROMPT
 let deferredPrompt;
+let installPromptShown = false;
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
 
-  // Show custom install prompt after 30 seconds
-  setTimeout(showInstallPrompt, 30000);
+  // Show custom install prompt after 30 seconds (only once per session)
+  if (!installPromptShown) {
+    setTimeout(showInstallPrompt, 30000);
+  }
 });
 
 function showInstallPrompt() {
-  if (!deferredPrompt) return;
+  if (!deferredPrompt || installPromptShown) return;
+
+  installPromptShown = true; // Mark as shown
 
   const prompt = document.createElement('div');
   prompt.className = 'install-prompt';
@@ -630,11 +657,20 @@ function showInstallPrompt() {
   const noBtn = prompt.querySelector('.install-no');
 
   yesBtn.addEventListener('click', async () => {
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`PWA install: ${outcome}`);
-    deferredPrompt = null;
-    prompt.remove();
+    try {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`✓ PWA install ${outcome}`);
+
+      if (outcome === 'accepted') {
+        triggerHaptic('success');
+      }
+    } catch (error) {
+      console.error('Install prompt failed:', error);
+    } finally {
+      deferredPrompt = null;
+      prompt.remove();
+    }
   });
 
   noBtn.addEventListener('click', () => {
@@ -643,11 +679,11 @@ function showInstallPrompt() {
   });
 
   document.body.appendChild(prompt);
-  prompt.classList.add('show');
+  setTimeout(() => prompt.classList.add('show'), 10);
 }
 
 // 6. PERFORMANCE MONITORING (hooks for analytics)
-const performance = {
+const appMetrics = {
   startTime: Date.now(),
 
   mark(name) {
@@ -674,7 +710,8 @@ const performance = {
         const lcpObserver = new PerformanceObserver((list) => {
           const entries = list.getEntries();
           const lastEntry = entries[entries.length - 1];
-          console.log('LCP:', lastEntry.renderTime || lastEntry.loadTime);
+          const lcp = lastEntry.renderTime || lastEntry.loadTime;
+          console.log('✓ LCP (Largest Contentful Paint):', lcp.toFixed(2) + 'ms', lcp < 2500 ? '✅ Good' : '⚠️ Needs improvement');
         });
         lcpObserver.observe({ entryTypes: ['largest-contentful-paint'] });
       } catch (e) {}
@@ -684,18 +721,33 @@ const performance = {
         const fidObserver = new PerformanceObserver((list) => {
           const entries = list.getEntries();
           entries.forEach(entry => {
-            console.log('FID:', entry.processingStart - entry.startTime);
+            const fid = entry.processingStart - entry.startTime;
+            console.log('✓ FID (First Input Delay):', fid.toFixed(2) + 'ms', fid < 100 ? '✅ Good' : '⚠️ Needs improvement');
           });
         });
         fidObserver.observe({ entryTypes: ['first-input'] });
+      } catch (e) {}
+
+      // Cumulative Layout Shift (CLS)
+      try {
+        let clsScore = 0;
+        const clsObserver = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (!entry.hadRecentInput) {
+              clsScore += entry.value;
+            }
+          }
+          console.log('✓ CLS (Cumulative Layout Shift):', clsScore.toFixed(3), clsScore < 0.1 ? '✅ Good' : '⚠️ Needs improvement');
+        });
+        clsObserver.observe({ type: 'layout-shift', buffered: true });
       } catch (e) {}
     }
   }
 };
 
 // Start performance tracking
-performance.mark('app-init-start');
-performance.trackWebVitals();
+appMetrics.mark('app-init-start');
+appMetrics.trackWebVitals();
 
 // 7. ERROR RECOVERY with exponential backoff
 async function fetchWithRetry(url, options = {}, maxRetries = 3) {
@@ -724,27 +776,6 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
   throw lastError;
 }
 
-// 8. LOADING SKELETON for usage indicator
-function setUsageLoading(isLoading) {
-  const usageElement = document.getElementById('usage');
-  if (isLoading) {
-    usageElement.classList.add('loading');
-  } else {
-    usageElement.classList.remove('loading');
-  }
-}
-
-// Update usage to use skeleton
-const originalUpdateUsage = updateUsage;
-async function updateUsage() {
-  setUsageLoading(true);
-  try {
-    await originalUpdateUsage();
-  } finally {
-    setUsageLoading(false);
-  }
-}
-
 // ============================================================================
 // ERROR HANDLING
 // ============================================================================
@@ -754,7 +785,7 @@ window.addEventListener('error', (event) => {
   console.error('Global error:', event.error);
 
   // Track error (hook for analytics)
-  performance.mark('error-occurred');
+  appMetrics.mark('error-occurred');
 });
 
 // Unhandled promise rejections
@@ -762,7 +793,7 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('Unhandled promise rejection:', event.reason);
 
   // Track error (hook for analytics)
-  performance.mark('promise-rejection');
+  appMetrics.mark('promise-rejection');
 });
 
 // ============================================================================
@@ -779,8 +810,23 @@ if (document.readyState === 'loading') {
 // Export for debugging (if needed)
 if (typeof window !== 'undefined') {
   window.CheatCodez = {
+    // State
     state,
+
+    // API methods
     updateUsage,
-    version: '2.0.0-hardened'
+    handleOptimize,
+
+    // Features
+    triggerHaptic,
+    showKeyboardShortcuts,
+    saveDraft,
+    loadDraft,
+
+    // Metrics
+    metrics: appMetrics,
+
+    // Version
+    version: '3.0.0-mobile-perfect'
   };
 }
