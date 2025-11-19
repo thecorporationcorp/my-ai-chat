@@ -4,7 +4,26 @@
 
 ## What is CheatCodez?
 
-CheatCodez is like Game Genie for AI. Paste any prompt, question, or entire conversation and get back the **optimized version** - what you *should have asked* to get real answers.
+CheatCodez is like **Game Genie for AI**. Just like Game Genie intercepted game memory and modified it with cheat codes, CheatCodez intercepts your prompts and injects optimization codes that unlock better answers.
+
+Paste any prompt, question, or entire conversation and get back the **optimized version** - what you *should have asked* to get real answers.
+
+### The 12 Cheat Codes
+
+1. **TOOLSEEKER** - Reveals if tools/products exist
+2. **SPECIFICITY+** - Transforms vague into specific
+3. **STEPBYSTEP** - Forces numbered breakdowns
+4. **EXAMPLES++** - Demands concrete examples
+5. **EXPERTMODE** - Skips beginner explanations
+6. **SHORTCUT** - Reveals the fastest way
+7. **EDGECASES** - Exposes potential problems
+8. **CONTEXT_INJECT** - Adds missing context
+9. **ASSUMPTION_BREAK** - Challenges hidden assumptions
+10. **TRUTHSERUM** - "What should I have asked?"
+11. **FORMAT_CONTROL** - Structures responses
+12. **DEPTH_DIAL** - Controls detail level
+
+**[Read full cheat code documentation →](CHEATCODES.md)**
 
 ### The Problem
 
@@ -26,8 +45,14 @@ CheatCodez takes your prompt and returns the optimized version. Copy it, paste i
 
 - **Frontend:** HTML, CSS, JavaScript (vanilla - no frameworks)
 - **Backend:** Node.js + Express
-- **AI:** OpenAI API or Anthropic API (your choice)
-- **Database:** Simple JSON file storage
+- **AI:** Works with ANY OpenAI-compatible API:
+  - OpenAI (GPT-4, GPT-3.5)
+  - Anthropic (Claude)
+  - Perplexity (research-focused)
+  - Together AI (cheap & fast)
+  - OpenRouter (multi-model access)
+  - Any custom OpenAI-compatible endpoint
+- **Database:** Simple JSON file storage (no setup needed)
 - **Payments:** Ko-fi / PayPal (manual verification codes)
 
 ## Installation & Setup
@@ -35,7 +60,13 @@ CheatCodez takes your prompt and returns the optimized version. Copy it, paste i
 ### Prerequisites
 
 - Node.js 18+ installed
-- An OpenAI API key OR Anthropic API key
+- **Optional:** An API key from any of these:
+  - OpenAI (recommended for quality)
+  - Anthropic (Claude)
+  - Perplexity ($3 credit works!)
+  - Together AI (very cheap)
+  - OpenRouter
+  - Or use NO API key (fallback mode for testing)
 - Ko-fi and/or PayPal account for payments
 
 ### Quick Start
@@ -52,19 +83,37 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` and add your API key:
+Edit `.env` and add your API key (choose ONE):
+
 ```env
-# Add ONE of these:
-OPENAI_API_KEY=sk-...
-# OR
-ANTHROPIC_API_KEY=sk-ant-...
+# OPTION 1: OpenAI (best quality)
+OPENAI_API_KEY=sk-proj-your-key
 
-# Server port (optional)
-PORT=3000
+# OPTION 2: Anthropic Claude
+ANTHROPIC_API_KEY=sk-ant-your-key
 
-# Verification codes for paid users (comma-separated)
+# OPTION 3: Perplexity (good with $3 credit!)
+PERPLEXITY_API_KEY=pplx-your-key
+API_URL=https://api.perplexity.ai/chat/completions
+MODEL_NAME=llama-3.1-sonar-large-128k-online
+
+# OPTION 4: Together AI (cheap)
+API_KEY=your-together-key
+API_URL=https://api.together.xyz/v1/chat/completions
+MODEL_NAME=meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
+
+# OPTION 5: OpenRouter (multi-model)
+API_KEY=sk-or-your-key
+API_URL=https://openrouter.ai/api/v1/chat/completions
+MODEL_NAME=anthropic/claude-3.5-sonnet
+
+# OPTION 6: No API key (uses fallback - works but less smart)
+
+# Verification codes for paid users
 VALID_CODES=CODE123,CODE456,CODE789
 ```
+
+See `.env.example` for all options.
 
 3. **Update payment links:**
 
