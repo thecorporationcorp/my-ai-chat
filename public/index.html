@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <!-- Modern viewport: prevent zoom, support safe areas (iPhone notch) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 
     <!-- Primary Meta Tags -->
     <title>CheatCodez - Cheat Codes for AI Conversations</title>
@@ -29,9 +30,23 @@
     <!-- Favicon (optional - add your own) -->
     <!-- <link rel="icon" type="image/png" href="/favicon.png"> -->
 
+    <!-- PWA Manifest - Make installable on mobile -->
+    <link rel="manifest" href="/manifest.json">
+
+    <!-- Apple Mobile Web App -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CheatCodez">
+
     <!-- Preconnect to external resources for performance -->
     <link rel="preconnect" href="https://assets.mixkit.co">
     <link rel="dns-prefetch" href="https://assets.mixkit.co">
+
+    <!-- Preconnect to API endpoints (400B budget: every millisecond counts) -->
+    <link rel="preconnect" href="https://api.openai.com">
+    <link rel="preconnect" href="https://api.anthropic.com">
+    <link rel="dns-prefetch" href="https://api.openai.com">
+    <link rel="dns-prefetch" href="https://api.anthropic.com">
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -182,5 +197,16 @@
     <script src="toast.js"></script>
     <script src="video-background.js"></script>
     <script src="app.js"></script>
+
+    <!-- Service Worker Registration (PWA support) -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(reg => console.log('✓ Service Worker registered'))
+                    .catch(err => console.log('Service Worker registration failed:', err));
+            });
+        }
+    </script>
 </body>
 </html>

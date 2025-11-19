@@ -99,7 +99,15 @@ async function init() {
     await updateUsage();
     setupEventListeners();
     setupValidation();
-    console.log('✓ CheatCodez initialized');
+
+    // Load draft (infinite budget feature)
+    loadDraft();
+
+    // Performance mark
+    performance.mark('app-init-end');
+    performance.measure('app-init', 'app-init-start', 'app-init-end');
+
+    console.log('✓ CheatCodez initialized (production-perfect)');
   } catch (error) {
     console.error('Initialization error:', error);
     alert('Failed to initialize app. Please refresh the page.');
@@ -229,6 +237,9 @@ async function handleOptimize() {
   state.isProcessing = true;
   setLoadingState(true);
 
+  // Haptic feedback
+  triggerHaptic('medium');
+
   try {
     const response = await fetchWithTimeout('/api/optimize', {
       method: 'POST',
@@ -309,14 +320,17 @@ async function handleCopy() {
   try {
     await navigator.clipboard.writeText(text);
 
-    // Show feedback
+    // Haptic feedback on mobile
+    triggerHaptic('success');
+
+    // Show feedback with ripple animation
     const originalText = DOM.copyBtn.querySelector('span').textContent;
     DOM.copyBtn.querySelector('span').textContent = '✅ Copied!';
-    DOM.copyBtn.classList.add('success');
+    DOM.copyBtn.classList.add('copied');
 
     setTimeout(() => {
       DOM.copyBtn.querySelector('span').textContent = originalText;
-      DOM.copyBtn.classList.remove('success');
+      DOM.copyBtn.classList.remove('copied');
     }, 2000);
   } catch (error) {
     console.error('Copy failed:', error);
@@ -439,17 +453,316 @@ function scrollTo(element) {
 }
 
 // ============================================================================
+// INFINITE BUDGET FEATURES - $400B level polish
+// ============================================================================
+
+// 1. AUTO-SAVE DRAFT to localStorage (never lose work)
+function saveDraft() {
+  const draft = DOM.userPromptTextarea.value;
+  if (draft) {
+    localStorage.setItem('cheatcodez_draft', draft);
+    localStorage.setItem('cheatcodez_draft_timestamp', Date.now());
+  } else {
+    localStorage.removeItem('cheatcodez_draft');
+    localStorage.removeItem('cheatcodez_draft_timestamp');
+  }
+}
+
+function loadDraft() {
+  const draft = localStorage.getItem('cheatcodez_draft');
+  const timestamp = localStorage.getItem('cheatcodez_draft_timestamp');
+
+  if (draft && timestamp) {
+    const age = Date.now() - parseInt(timestamp);
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+
+    // Only restore drafts < 24 hours old
+    if (age < ONE_DAY) {
+      DOM.userPromptTextarea.value = draft;
+      console.log('✓ Draft restored');
+    } else {
+      localStorage.removeItem('cheatcodez_draft');
+      localStorage.removeItem('cheatcodez_draft_timestamp');
+    }
+  }
+}
+
+// Auto-save on input (debounced)
+DOM.userPromptTextarea.addEventListener('input', debounce(saveDraft, 1000));
+
+// 2. HAPTIC FEEDBACK (mobile vibration)
+function triggerHaptic(type = 'light') {
+  if (!navigator.vibrate) return;
+
+  const patterns = {
+    light: [10],
+    medium: [20],
+    heavy: [30],
+    success: [10, 20, 10],
+    error: [20, 10, 20, 10, 20]
+  };
+
+  navigator.vibrate(patterns[type] || patterns.light);
+}
+
+// 3. KEYBOARD SHORTCUTS
+const shortcuts = {
+  '?': showKeyboardShortcuts,
+  'Escape': hideKeyboardShortcuts,
+};
+
+function showKeyboardShortcuts() {
+  let overlay = document.querySelector('.keyboard-shortcuts');
+
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'keyboard-shortcuts';
+    overlay.innerHTML = `
+      <h2>⌨️ Keyboard Shortcuts</h2>
+      <div class="shortcut-list">
+        <div class="shortcut-item">
+          <span class="shortcut-key">?</span>
+          <span class="shortcut-description">Show shortcuts</span>
+        </div>
+        <div class="shortcut-item">
+          <span class="shortcut-key">Shift + Enter</span>
+          <span class="shortcut-description">Optimize prompt</span>
+        </div>
+        <div class="shortcut-item">
+          <span class="shortcut-key">Ctrl/Cmd + Enter</span>
+          <span class="shortcut-description">Optimize prompt</span>
+        </div>
+        <div class="shortcut-item">
+          <span class="shortcut-key">Escape</span>
+          <span class="shortcut-description">Close dialog</span>
+        </div>
+      </div>
+      <button class="shortcuts-close" onclick="this.parentElement.classList.remove('show')">
+        Close
+      </button>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  overlay.classList.add('show');
+}
+
+function hideKeyboardShortcuts() {
+  const overlay = document.querySelector('.keyboard-shortcuts');
+  if (overlay) {
+    overlay.classList.remove('show');
+  }
+}
+
+// Global keyboard listener
+document.addEventListener('keydown', (e) => {
+  // Ignore if typing in input
+  if (e.target.matches('input, textarea')) {
+    if (e.key === 'Escape') {
+      hideKeyboardShortcuts();
+    }
+    return;
+  }
+
+  if (shortcuts[e.key]) {
+    e.preventDefault();
+    shortcuts[e.key]();
+  }
+});
+
+// 4. OFFLINE DETECTION
+let offlineIndicator;
+
+function showOfflineIndicator() {
+  if (!offlineIndicator) {
+    offlineIndicator = document.createElement('div');
+    offlineIndicator.className = 'offline-indicator';
+    offlineIndicator.textContent = '⚠️ No internet connection';
+    document.body.appendChild(offlineIndicator);
+  }
+  offlineIndicator.classList.add('show');
+}
+
+function hideOfflineIndicator() {
+  if (offlineIndicator) {
+    offlineIndicator.classList.remove('show');
+  }
+}
+
+window.addEventListener('online', () => {
+  hideOfflineIndicator();
+  if (window.toast) {
+    window.toast.success('Back online!');
+  }
+});
+
+window.addEventListener('offline', () => {
+  showOfflineIndicator();
+  if (window.toast) {
+    window.toast.error('Lost internet connection');
+  }
+});
+
+// 5. PWA INSTALL PROMPT
+let deferredPrompt;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+
+  // Show custom install prompt after 30 seconds
+  setTimeout(showInstallPrompt, 30000);
+});
+
+function showInstallPrompt() {
+  if (!deferredPrompt) return;
+
+  const prompt = document.createElement('div');
+  prompt.className = 'install-prompt';
+  prompt.innerHTML = `
+    <strong>📱 Install CheatCodez</strong>
+    <p>Get faster access with our mobile app!</p>
+    <button class="install-yes">Install</button>
+    <button class="install-no">Not now</button>
+  `;
+
+  const yesBtn = prompt.querySelector('.install-yes');
+  const noBtn = prompt.querySelector('.install-no');
+
+  yesBtn.addEventListener('click', async () => {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`PWA install: ${outcome}`);
+    deferredPrompt = null;
+    prompt.remove();
+  });
+
+  noBtn.addEventListener('click', () => {
+    prompt.remove();
+    deferredPrompt = null;
+  });
+
+  document.body.appendChild(prompt);
+  prompt.classList.add('show');
+}
+
+// 6. PERFORMANCE MONITORING (hooks for analytics)
+const performance = {
+  startTime: Date.now(),
+
+  mark(name) {
+    if (window.performance && window.performance.mark) {
+      window.performance.mark(name);
+    }
+  },
+
+  measure(name, startMark, endMark) {
+    if (window.performance && window.performance.measure) {
+      try {
+        window.performance.measure(name, startMark, endMark);
+      } catch (e) {
+        // Marks might not exist
+      }
+    }
+  },
+
+  // Track Core Web Vitals
+  trackWebVitals() {
+    if ('PerformanceObserver' in window) {
+      // Largest Contentful Paint (LCP)
+      try {
+        const lcpObserver = new PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          const lastEntry = entries[entries.length - 1];
+          console.log('LCP:', lastEntry.renderTime || lastEntry.loadTime);
+        });
+        lcpObserver.observe({ entryTypes: ['largest-contentful-paint'] });
+      } catch (e) {}
+
+      // First Input Delay (FID)
+      try {
+        const fidObserver = new PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          entries.forEach(entry => {
+            console.log('FID:', entry.processingStart - entry.startTime);
+          });
+        });
+        fidObserver.observe({ entryTypes: ['first-input'] });
+      } catch (e) {}
+    }
+  }
+};
+
+// Start performance tracking
+performance.mark('app-init-start');
+performance.trackWebVitals();
+
+// 7. ERROR RECOVERY with exponential backoff
+async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+  let lastError;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetchWithTimeout(url, options);
+      return response;
+    } catch (error) {
+      lastError = error;
+
+      // Don't retry on client errors (4xx)
+      if (error.message.includes('HTTP 4')) {
+        throw error;
+      }
+
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = Math.pow(2, i) * 1000;
+      console.log(`Retry ${i + 1}/${maxRetries} after ${delay}ms`);
+
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
+// 8. LOADING SKELETON for usage indicator
+function setUsageLoading(isLoading) {
+  const usageElement = document.getElementById('usage');
+  if (isLoading) {
+    usageElement.classList.add('loading');
+  } else {
+    usageElement.classList.remove('loading');
+  }
+}
+
+// Update usage to use skeleton
+const originalUpdateUsage = updateUsage;
+async function updateUsage() {
+  setUsageLoading(true);
+  try {
+    await originalUpdateUsage();
+  } finally {
+    setUsageLoading(false);
+  }
+}
+
+// ============================================================================
 // ERROR HANDLING
 // ============================================================================
 
 // Global error handler
 window.addEventListener('error', (event) => {
   console.error('Global error:', event.error);
+
+  // Track error (hook for analytics)
+  performance.mark('error-occurred');
 });
 
 // Unhandled promise rejections
 window.addEventListener('unhandledrejection', (event) => {
   console.error('Unhandled promise rejection:', event.reason);
+
+  // Track error (hook for analytics)
+  performance.mark('promise-rejection');
 });
 
 // ============================================================================
