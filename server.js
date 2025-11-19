@@ -334,21 +334,30 @@ app.post('/api/optimize', async (req, res) => {
 });
 
 // ============================================================================
-// PROJECT-BASED ENDPOINT (Uses OpenAI Project System)
+// PROJECT-BASED ENDPOINT (Uses OpenAI Project for Organization)
 // ============================================================================
 
 /**
  * /api/generate - OpenAI Project Integration
  *
- * This endpoint uses the OpenAI Responses API with Projects.
- * System prompts live in the OpenAI Project files, NOT in this code.
+ * This endpoint uses OpenAI Projects for billing and organization.
+ * The OpenAI-Project header tells OpenAI which project to bill usage to.
+ *
+ * IMPORTANT CLARIFICATION:
+ * - System prompt still comes from GOD_PROMPT constant in this file
+ * - OpenAI-Project header is for billing/tracking only
+ * - It does NOT automatically load prompts from project files
  *
  * SETUP:
  * 1. Create an OpenAI Project at https://platform.openai.com/projects
- * 2. Upload your system prompt file (e.g., system.md) to the project
- * 3. Copy the Project ID (e.g., proj_abc123...)
- * 4. Add it to your .env file: OPENAI_PROJECT_ID=proj_abc123...
- * 5. Restart server - everything will work instantly
+ * 2. Copy the Project ID (e.g., proj_abc123...)
+ * 3. Add it to your .env file: OPENAI_PROJECT_ID=proj_abc123...
+ * 4. Restart server - usage will be tracked under your project
+ *
+ * BENEFITS:
+ * - Organized billing per project
+ * - Usage tracking and analytics
+ * - Project-specific API keys and rate limits
  */
 app.post('/api/generate', async (req, res) => {
   try {
@@ -660,19 +669,19 @@ async function optimizeWithAnthropic(userPrompt) {
 }
 
 // ============================================================================
-// PROJECT-BASED AI GENERATION (No system prompt in code!)
+// PROJECT-BASED AI GENERATION (Uses GOD_PROMPT + Project billing)
 // ============================================================================
 
 /**
  * Generate response using OpenAI Project
  *
- * The system prompt lives in the OpenAI Project files (e.g., system.md),
- * NOT in this code. This keeps prompts version-controlled in OpenAI's system.
+ * Uses the GOD_PROMPT constant for system instructions.
+ * The projectId is sent as a header for billing/organization tracking.
  *
- * IMPORTANT:
- * - No system prompt needed here
- * - Upload GOD_PROMPT to your project as system.md
- * - OpenAI automatically uses it
+ * CLARIFICATION:
+ * - System prompt comes from GOD_PROMPT constant (defined above)
+ * - OpenAI-Project header is for billing/tracking only
+ * - This gives you organized usage analytics per project
  *
  * @param {Object} options - Generation options
  * @param {string} options.prompt - User's prompt
@@ -694,19 +703,21 @@ async function generateWithProject({ prompt, projectId }) {
     const timeout = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT);
 
     // OpenAI API call with Project ID
-    // System prompt comes from project files, NOT from this code
+    // System prompt comes from code (GOD_PROMPT constant above)
+    // The OpenAI-Project header is for billing/organization only
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        // CRITICAL: This tells OpenAI to use your project's system prompt
+        // IMPORTANT: This header is for billing/tracking, NOT for loading prompts
         'OpenAI-Project': projectId
       },
       body: JSON.stringify({
         model: model,
         messages: [
-          // NO system message here - it comes from the project files
+          // System prompt from GOD_PROMPT constant
+          { role: 'system', content: GOD_PROMPT },
           { role: 'user', content: prompt }
         ],
         temperature: 0.7,
